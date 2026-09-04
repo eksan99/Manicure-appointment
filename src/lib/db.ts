@@ -1,132 +1,161 @@
-import Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
+import { createClient, type Client } from "@libsql/client";
 import type { Appointment, AppointmentStatus } from "./types";
 
-const DATA_DIR =
-  process.env.DATA_DIR?.trim() || path.join(process.cwd(), "data");
-const DB_PATH = path.join(DATA_DIR, "appointments.db");
+const DATA_DIR = path.join(process.cwd(), "data");
 
-let db: Database.Database | null = null;
+let client: Client | null = null;
+let schemaPromise: Promise<void> | null = null;
 
-function ensureSchema(database: Database.Database) {
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS appointments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      customer_name TEXT NOT NULL,
-      contact TEXT NOT NULL,
-      date TEXT NOT NULL,
-      slot TEXT NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'cancelled')),
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
+function getClient(): Client {
+  if (client) return client;
 
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_active_slot
-      ON appointments(date, slot)
-      WHERE status IN ('pending', 'confirmed');
-  `);
-}
+  const url = process.env.TURSO_DATABASE_URL;
+  const authToken = process.env.TURSO_AUTH_TOKEN;
 
-export function getDb(): Database.Database {
-  if (db) return db;
-
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (url) {
+    client = authToken ? createClient({ url, authToken }) : createClient({ url });
+  } else {
+    // Local development fallback: a plain libSQL file in ./data.
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    client = createClient({ url: "file:./data/local.db" });
   }
 
-  db = new Database(DB_PATH);
-  db.pragma("journal_mode = WAL");
-  ensureSchema(db);
-  return db;
+  return client;
 }
 
-export function getActiveBookedSlots(date: string): string[] {
-  const rows = getDb()
-    .prepare(
-      `SELECT slot FROM appointments
-       WHERE date = ? AND status IN ('pending', 'confirmed')`
-    )
-    .all(date) as { slot: string }[];
-  return rows.map((r) => r.slot);
+function ensureSchema(): Promise<void> {
+  if (!schemaPromise) {
+    schemaPromise = (async () => {
+      const db = getClient();
+      await db.execute(`
+        CREATE TABLE IF NOT EXISTS appointments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          customer_name TEXT NOT NULL,
+          contact TEXT NOT NULL,
+          date TEXT NOT NULL,
+          slot TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'cancelled')),
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      await db.execute(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_active_slot
+          ON appointments(date, slot)
+          WHERE status IN ('pending', 'confirmed')
+      `);
+    })();
+  }
+  return schemaPromise;
 }
 
-export function createAppointment(input: {
+export async function getActiveBookedSlots(date: string): Promise<string[]> {
+  await ensureSchema();
+  const result = await getClient().execute({
+    sql: `SELECT slot FROM appointments
+          WHERE date = ? AND status IN ('pending', 'confirmed')`,
+    args: [date],
+  });
+  return result.rows.map((row) => String(row.slot));
+}
+
+export async function createAppointment(input: {
   customer_name: string;
   contact: string;
   date: string;
   slot: string;
-}): Appointment {
-  const result = getDb()
-    .prepare(
-      `INSERT INTO appointments (customer_name, contact, date, slot, status)
-       VALUES (@customer_name, @contact, @date, @slot, 'pending')`
-    )
-    .run(input);
+}): Promise<Appointment> {
+  await ensureSchema();
+  const result = await getClient().execute({
+    sql: `INSERT INTO appointments (customer_name, contact, date, slot, status)
+          VALUES (?, ?, ?, ?, 'pending')`,
+    args: [input.customer_name, input.contact, input.date, input.slot],
+  });
 
-  return getAppointmentById(Number(result.lastInsertRowid))!;
+  const id = Number(result.lastInsertRowid);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new Error("Failed to create booking: no row id returned");
+  }
+
+  const appointment = await getAppointmentById(id);
+  if (!appointment) {
+    throw new Error("Failed to create booking");
+  }
+  return appointment;
 }
 
-export function getAppointmentById(id: number): Appointment | null {
-  const row = getDb()
-    .prepare(`SELECT * FROM appointments WHERE id = ?`)
-    .get(id) as Appointment | undefined;
-  return row ?? null;
+export async function getAppointmentById(id: number): Promise<Appointment | null> {
+  await ensureSchema();
+  const result = await getClient().execute({
+    sql: `SELECT * FROM appointments WHERE id = ?`,
+    args: [id],
+  });
+  return (result.rows[0] as unknown as Appointment) ?? null;
 }
 
-export function findAppointmentsByContact(contact: string): Appointment[] {
+export async function findAppointmentsByContact(
+  contact: string
+): Promise<Appointment[]> {
+  await ensureSchema();
   const normalized = contact.trim();
   if (!normalized) return [];
 
-  return getDb()
-    .prepare(
-      `SELECT * FROM appointments
-       WHERE contact = ?
-       ORDER BY date DESC, slot DESC, id DESC
-       LIMIT 20`
-    )
-    .all(normalized) as Appointment[];
+  const result = await getClient().execute({
+    sql: `SELECT * FROM appointments
+          WHERE contact = ?
+          ORDER BY date DESC, slot DESC, id DESC
+          LIMIT 20`,
+    args: [normalized],
+  });
+  return result.rows as unknown as Appointment[];
 }
 
-export function listAppointments(filters?: {
+export async function listAppointments(filters?: {
   date?: string;
   status?: AppointmentStatus | "all";
-}): Appointment[] {
+}): Promise<Appointment[]> {
+  await ensureSchema();
+
   const clauses: string[] = [];
-  const params: Record<string, string> = {};
+  const args: string[] = [];
 
   if (filters?.date) {
-    clauses.push("date = @date");
-    params.date = filters.date;
+    clauses.push("date = ?");
+    args.push(filters.date);
   }
   if (filters?.status && filters.status !== "all") {
-    clauses.push("status = @status");
-    params.status = filters.status;
+    clauses.push("status = ?");
+    args.push(filters.status);
   }
 
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  return getDb()
-    .prepare(
-      `SELECT * FROM appointments ${where}
-       ORDER BY date ASC, slot ASC, id ASC`
-    )
-    .all(params) as Appointment[];
+  const result = await getClient().execute({
+    sql: `SELECT * FROM appointments ${where}
+          ORDER BY date ASC, slot ASC, id ASC`,
+    args,
+  });
+  return result.rows as unknown as Appointment[];
 }
 
-export function updateAppointmentStatus(
+export async function updateAppointmentStatus(
   id: number,
   status: AppointmentStatus
-): Appointment | null {
-  const existing = getAppointmentById(id);
+): Promise<Appointment | null> {
+  await ensureSchema();
+
+  const existing = await getAppointmentById(id);
   if (!existing) return null;
 
-  getDb()
-    .prepare(
-      `UPDATE appointments
-       SET status = ?, updated_at = datetime('now')
-       WHERE id = ?`
-    )
-    .run(status, id);
+  await getClient().execute({
+    sql: `UPDATE appointments
+          SET status = ?, updated_at = datetime('now')
+          WHERE id = ?`,
+    args: [status, id],
+  });
 
   return getAppointmentById(id);
 }

@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
     if (!Number.isInteger(id) || id <= 0) {
       return NextResponse.json({ error: "Invalid booking id" }, { status: 400 });
     }
-    const appointment = getAppointmentById(id);
+    const appointment = await getAppointmentById(id);
     if (!appointment) {
       return NextResponse.json({ error: "Booking not found" }, { status: 404 });
     }
@@ -26,6 +26,6 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const appointments = findAppointmentsByContact(contact);
+  const appointments = await findAppointmentsByContact(contact);
   return NextResponse.json({ appointments });
 }

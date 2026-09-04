@@ -6,7 +6,7 @@ Web booking for a single manicurist. See [SPEC.md](./SPEC.md) for full product r
 
 ```bash
 npm install
-cp .env.example .env.local   # set ADMIN_PASSWORD and NEXT_PUBLIC_APP_URL
+cp .env.example .env.local   # set ADMIN_PASSWORD (optional for local dev)
 npm run dev
 ```
 
@@ -17,10 +17,15 @@ npm run dev
 
 Default local admin password: `changeme`
 
+Local development stores data in a local SQLite file (`data/local.db`) — no
+database service required. To use the hosted Turso database locally instead, set
+`TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` in `.env.local`.
+
 ## Stack
 
-Next.js App Router, TypeScript, Tailwind, SQLite (`better-sqlite3`). Database file lives in `data/appointments.db`.
+Next.js App Router, TypeScript, Tailwind, and SQLite via libSQL (`@libsql/client`).
+Production uses [Turso](https://turso.tech); local dev falls back to a local file.
 
-## Deploy (free)
+## Deploy
 
-See **[DEPLOY.md](./DEPLOY.md)** for Fly.io (free tier + persistent SQLite) and iPad office setup.
+See [DEPLOY.md](./DEPLOY.md) for the free Render + Turso setup.

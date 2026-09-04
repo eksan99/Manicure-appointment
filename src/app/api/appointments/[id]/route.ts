@@ -12,7 +12,7 @@ export async function GET(_request: Request, { params }: Params) {
     return NextResponse.json({ error: "Invalid booking id" }, { status: 400 });
   }
 
-  const appointment = getAppointmentById(id);
+  const appointment = await getAppointmentById(id);
   if (!appointment) {
     return NextResponse.json({ error: "Booking not found" }, { status: 404 });
   }

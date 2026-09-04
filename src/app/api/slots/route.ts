@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
   }
 
   const allSlots = getSlotsForDate(date);
-  const booked = new Set(getActiveBookedSlots(date));
+  const booked = new Set(await getActiveBookedSlots(date));
   const slots = allSlots.filter(
     (slot) => !booked.has(slot) && isSlotStillBookable(date, slot)
   );

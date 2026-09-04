@@ -1,0 +1,31 @@
+# Render Blueprint — deploy from GitHub (free tier)
+# Docs: https://render.com/docs/blueprint-spec
+#
+# Connect this repo in Render → New → Blueprint. Render reads this file,
+# creates the web service, and redeploys on every push to the deploy branch.
+
+services:
+  - type: web
+    name: manicure-appointment-app
+    runtime: node
+    plan: free
+    region: singapore # change to oregon/ohio/frankfurt if you prefer
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      # Fill these in when prompted (Render does not commit secrets):
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      # Public URL used to generate the QR code. Set to your final
+      # https://<name>.onrender.com URL (or custom domain) and redeploy.
+      - key: NEXT_PUBLIC_APP_URL
+        sync: false

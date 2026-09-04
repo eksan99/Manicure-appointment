@@ -54,9 +54,9 @@ After booking, the confirmation screen **auto-refreshes** while status is `pendi
 
 ## Technical notes
 
-- Stack: Next.js App Router, TypeScript, Tailwind, SQLite (`better-sqlite3`)
+- Stack: Next.js App Router, TypeScript, Tailwind, SQLite via libSQL (`@libsql/client`; Turso in production, local file in dev)
 - Double-booking guard: unique index on active `(date, slot)` + transactional insert
-- Env: `ADMIN_PASSWORD`, `NEXT_PUBLIC_APP_URL`, optional `SESSION_SECRET`
+- Env: `ADMIN_PASSWORD`, `SESSION_SECRET`, `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN` (production), `NEXT_PUBLIC_APP_URL`
 
 ## Smoke-test checklist
 

@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const appointment = createAppointment({
+    const appointment = await createAppointment({
       customer_name,
       contact,
       date,

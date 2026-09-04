@@ -19,6 +19,6 @@ export async function GET(request: NextRequest) {
       ? (statusParam as AppointmentStatus | "all")
       : "all";
 
-  const appointments = listAppointments({ date, status });
+  const appointments = await listAppointments({ date, status });
   return NextResponse.json({ appointments });
 }

@@ -1,109 +1,97 @@
-# Deploy (free tier)
+# Deploy — 100% free (Render + Turso)
 
-Recommended host: **[Fly.io](https://fly.io)** — free allowance, HTTPS, persistent volume for SQLite, Singapore region (`sin`).
+This app stores bookings in **Turso** (free hosted SQLite) and runs on
+**Render's free tier**. Both are free with **no credit card**, and deploy
+automatically from your GitHub repo.
 
-You only need a laptop **once** to deploy. After that, staff use an **iPad** in Safari:
+## Why Render + Turso
 
-- Customers: `https://YOUR-APP.fly.dev/book` (or QR)
-- Staff: `https://YOUR-APP.fly.dev/admin`
+- **Render free tier**: free Node.js web service, redeploys on every `git push`.
+  Free services **sleep after ~15 min of inactivity** and wake on the next
+  request (first hit can take ~30–60s).
+- **Turso**: free hosted SQLite (libSQL), so bookings persist even though
+  Render's filesystem is ephemeral.
 
-## 1. Push code to GitHub
+> Railway was considered but no longer has a free tier (usage-based, requires a
+> card). Fly now requires a payment method — which is why we moved.
 
-Repo: `https://github.com/eksan99/manicure-appointment-app`
+## 1. Create the Turso database
 
-If the repo does not exist yet, create an empty repo on GitHub with that name, then:
-
-```bash
-git remote add origin https://github.com/eksan99/manicure-appointment-app.git
-git branch -M main
-git push -u origin main
-```
-
-## 2. Install Fly CLI (one time, on your laptop)
-
-Windows (PowerShell):
-
-```powershell
-powershell -Command "iwr https://fly.io/install.ps1 -useb | iex"
-```
-
-Sign up / log in:
+Install the Turso CLI (see https://docs.turso.tech/cli/install for your OS), or
+use the web dashboard at https://app.turso.tech.
 
 ```bash
-fly auth signup
-# or
-fly auth login
+turso auth signup
+turso db create appointments
+turso db tokens create appointments
 ```
 
-## 3. Create the app and database volume
+`turso db tokens create` prints a token **once** — save it. Your database URL is
+shown by `turso db show appointments` and looks like
+`libsql://appointments-<org>.turso.io`.
 
-From the project folder:
+## 2. Deploy to Render
+
+1. Push this repo to GitHub.
+2. Sign in to https://render.com with GitHub (free plan).
+3. **New → Blueprint**, then select your repo. Render reads `render.yaml`.
+4. Fill in the environment variables it asks for:
+
+| Variable | Value |
+|----------|-------|
+| `TURSO_DATABASE_URL` | your `libsql://…` URL |
+| `TURSO_AUTH_TOKEN` | your Turso token |
+| `ADMIN_PASSWORD` | a strong admin password |
+| `SESSION_SECRET` | a long random string (e.g. `openssl rand -hex 32`) |
+| `NEXT_PUBLIC_APP_URL` | `https://<your-service>.onrender.com` (or custom domain) |
+
+5. Click **Apply**. Render runs `npm install && npm run build`, then starts the
+   app with `npm start`.
+
+## 3. Set your public URL (for the QR code)
+
+Render gives you a URL like `https://manicure-appointment-app.onrender.com`.
+
+Set `NEXT_PUBLIC_APP_URL` to that exact URL (Environment → edit → **Save**).
+Render redeploys and inlines it into the build, so the QR points at the right
+address.
+
+- Customers book: `https://<url>/book`
+- Staff admin: `https://<url>/admin`
+- QR for printout: `https://<url>/admin/qr` (after admin login)
+
+## 4. Local development
+
+No Turso account is needed for local dev — the app falls back to a local SQLite
+file at `data/local.db`:
 
 ```bash
-fly launch --no-deploy
+npm install
+cp .env.example .env.local   # set ADMIN_PASSWORD (optional for dev)
+npm run dev
 ```
 
-When prompted:
+To test against your real Turso database locally, add to `.env.local`:
 
-- Use existing `fly.toml` → **yes**
-- App name → `manicure-appointment-app` (or pick a unique name)
-- Region → **Singapore (sin)**
+```
+TURSO_DATABASE_URL=libsql://…
+TURSO_AUTH_TOKEN=…
+```
 
-Create persistent storage (keeps bookings across restarts):
+## Updating the app
+
+Push to your deploy branch — Render redeploys automatically. Editing environment
+variables also triggers a redeploy.
+
+## Backing up bookings
 
 ```bash
-fly volumes create appointment_data --region sin --size 1
+turso db shell appointments ".dump" > backup.sql
 ```
 
-## 4. Set secrets (passwords)
+(Or use Turso's export in the web dashboard.)
 
-```bash
-fly secrets set ADMIN_PASSWORD="your-strong-password"
-fly secrets set SESSION_SECRET="paste-a-long-random-string-here"
-```
+## Costs / limits
 
-After the first deploy, set the public URL (replace with your real Fly URL):
-
-```bash
-fly secrets set NEXT_PUBLIC_APP_URL="https://manicure-appointment-app.fly.dev"
-```
-
-## 5. Deploy
-
-```bash
-fly deploy
-```
-
-Open the site:
-
-```bash
-fly open
-```
-
-## 6. iPad setup in the office
-
-1. Safari → `https://YOUR-APP.fly.dev/admin`
-2. Log in with `ADMIN_PASSWORD`
-3. **Share → Add to Home Screen** (admin shortcut)
-4. Open **Booking QR**, print or display at the counter
-
-## Costs
-
-Fly.io free tier includes a monthly usage allowance. A small booking app with auto-stop when idle usually stays within free limits. The 1 GB volume is low cost if exceeded — check [fly.io/docs/about/pricing](https://fly.io/docs/about/pricing).
-
-## Troubleshooting
-
-| Issue | Fix |
-|-------|-----|
-| Bookings disappear after redeploy | Volume not mounted — run `fly volumes list` and check `fly.toml` `[mounts]` |
-| QR opens wrong URL | Update `NEXT_PUBLIC_APP_URL` and redeploy |
-| App slow first visit | Free tier auto-stops when idle; first request wakes the machine (~5–10s) |
-| `better-sqlite3` build error | Deploy uses Docker (`Dockerfile`); do not use serverless hosts |
-
-## Other free options (not configured here)
-
-| Host | SQLite | Notes |
-|------|--------|-------|
-| Oracle Cloud Always Free VPS | Yes | More setup, always-on VM |
-| Render free | Risky | Disk is ephemeral on free tier |
-| Vercel | No | Not suitable for SQLite file DB |
+- Render free web service: no card, sleeps when idle, cold-start on wake.
+- Turso free plan: generous free storage/rows, no card.

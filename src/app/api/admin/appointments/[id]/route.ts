@@ -33,7 +33,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   }
 
   try {
-    const appointment = updateAppointmentStatus(id, status);
+    const appointment = await updateAppointmentStatus(id, status);
     if (!appointment) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
